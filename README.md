@@ -17,7 +17,7 @@ Machine Learning Project
 
 This project focuses on predicting the selling price of heavy equipment using historical transaction data.
 
-The project is based on the **Heavy Equipment Selling Price Prediction Challenge** as part of the MLP Project 2026 T2.
+The project is based on the **Heavy Equipment Selling Price Prediction Challenge** as part of the Machine Learning Project.
 
 ## Challenge
 
