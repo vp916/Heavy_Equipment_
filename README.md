@@ -82,25 +82,49 @@ Python 3.14
 
 ### Create the Environment
 
+From the project root:
+
 ```bash
 python -m venv .
 ```
 
+This creates the virtual environment inside the project directory.
+
+> **Note:** The virtual environment layout is different on Unix-based systems and Windows.
+
 ### Activate the Environment
 
-For Fish shell:
+#### Linux / macOS
 
-```bash
-source ./bin/activate.fish
-```
-
-For Bash/Zsh:
+For Bash / Zsh:
 
 ```bash
 source ./bin/activate
 ```
 
+For Fish shell:
+
+```fish
+source ./bin/activate.fish
+```
+
+#### Windows
+
+For Command Prompt:
+
+```cmd
+.\Scripts\activate
+```
+
+For PowerShell:
+
+```powershell
+.\Scripts\Activate.ps1
+```
+
 ### Upgrade pip
+
+After activating the environment:
 
 ```bash
 python -m pip install --upgrade pip
@@ -109,18 +133,26 @@ python -m pip install --upgrade pip
 ### Install Dependencies
 
 ```bash
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 ```
 
 ### Install Jupyter Kernel
 
-```bash
-pip install ipykernel
+Install `ipykernel`:
 
-python -m ipykernel install --user \
-    --name heavy-equipment \
-    --display-name "Heavy Equipment (Python 3.14)"
+```bash
+python -m pip install ipykernel
 ```
+
+Register the environment as a Jupyter kernel.
+
+The following command works in both Linux/macOS and Windows:
+
+```bash
+python -m ipykernel install --user --name heavy-equipment --display-name "Heavy Equipment (Python 3.14)"
+```
+
+The registered kernel can then be selected from VS Code or Jupyter when working with project notebooks.
 
 ### Verify the Environment
 
@@ -132,10 +164,18 @@ import sys
 print(sys.executable)
 ```
 
-The output should point to the project's virtual environment:
+The output should point to the project's virtual environment.
+
+For Linux/macOS:
 
 ```text
 .../heavy_equipment/bin/python
+```
+
+For Windows:
+
+```text
+...\heavy_equipment\Scripts\python.exe
 ```
 
 ## Project Structure
@@ -175,6 +215,7 @@ heavy_equipment/
 ├── train.csv
 ├── test.csv
 ├── metadata.csv
+├── sample_submission.csv
 ├── README.md
 ├── requirements.txt
 ├── .gitignore
@@ -186,7 +227,5 @@ heavy_equipment/
 │
 └── test_result/
 ```
-
-If provided by the competition, `sample_submission.csv` can also be kept locally.
 
 The CSV files are ignored by Git through `.gitignore`.
