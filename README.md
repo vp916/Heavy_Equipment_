@@ -1,6 +1,6 @@
 # Heavy Equipment Selling Price Prediction
 
-Machine Learning Project 
+Machine Learning Project
 
 ## Table of Contents
 
@@ -140,38 +140,53 @@ The output should point to the project's virtual environment:
 
 ## Project Structure
 
-The project is intentionally kept simple:
+The project is organized as follows:
 
 ```text
 heavy_equipment/
 ├── README.md
 ├── requirements.txt
 ├── .gitignore
-└── notebooks/
+│
+├── notebook/
+│   └── model_development.ipynb
+│
+├── models/
+│
+└── test_result/
 ```
 
-The virtual environment is also created inside the project directory, but its files are excluded from Git using `.gitignore`.
+- `notebook/` — contains notebooks used for data analysis and model development.
+- `models/` — stores trained models and related model artifacts.
+- `test_result/` — stores prediction results and test outputs.
+- `requirements.txt` — contains the Python dependencies required for the project.
+- `.gitignore` — specifies files and directories that should not be tracked by Git.
 
-The `notebooks/` directory will contain the notebooks used during the project.
+The Python virtual environment is created inside the project directory, but its files are excluded from Git using `.gitignore`.
 
 ## Data Setup
 
 The competition datasets are kept locally and are not committed to Git.
 
-For local development, keep the downloaded competition files available in the project directory as needed:
+For local development, the downloaded competition files can be kept in the project directory:
 
 ```text
 heavy_equipment/
 ├── train.csv
 ├── test.csv
 ├── metadata.csv
-├── sample_submission.csv
 ├── README.md
 ├── requirements.txt
 ├── .gitignore
-└── notebooks/
+│
+├── notebook/
+│   └── model_development.ipynb
+│
+├── models/
+│
+└── test_result/
 ```
 
-The CSV files are ignored by Git through `.gitignore`.
+If provided by the competition, `sample_submission.csv` can also be kept locally.
 
-As the project develops, notebooks and other project files will be added through separate commits.
+The CSV files are ignored by Git through `.gitignore`.
