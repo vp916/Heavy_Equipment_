@@ -1,6 +1,6 @@
 # Heavy Equipment Selling Price Prediction
 
-Machine Learning Project — MLP Project 2026 T2
+Machine Learning Project 
 
 ## Table of Contents
 
