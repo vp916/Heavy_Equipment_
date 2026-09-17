@@ -21,7 +21,8 @@ pyvenv.cfg
 
 catboost_info/
 
-
+notebook/train_model.ipynb
+notebook/train_model.py
 # Jupyter
 
 

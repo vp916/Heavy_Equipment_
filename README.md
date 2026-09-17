@@ -149,7 +149,7 @@ Register the environment as a Jupyter kernel.
 The following command works in both Linux/macOS and Windows:
 
 ```bash
-python -m ipykernel install --user --name heavy-equipment --display-name "Heavy Equipment (Python 3.14)"
+python -m ipykernel install --user --name heavy-equipment-project --display-name "Heavy Equipment Project (Python 3.14)"
 ```
 
 The registered kernel can then be selected from VS Code or Jupyter when working with project notebooks.
