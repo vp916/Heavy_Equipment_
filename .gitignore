@@ -36,7 +36,7 @@ notebooks/train_model.py
 
 
 
-# Models / Artifacts
+# Models/Artifacts
 
 models/
 *.pkl
