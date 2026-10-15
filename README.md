@@ -48,11 +48,10 @@ The blue line shows the leak-free 5-fold CV score at each milestone. The hollow 
 3. [Evaluation Metric](#3-evaluation-metric)
 4. [Methodology](#4-methodology)
 5. [Results](#5-results)
-6. [Observations and Limitations](#6-observations-and-limitations)
-7. [Project Structure](#7-project-structure)
-8. [Environment Setup](#8-environment-setup)
-9. [Data Setup](#9-data-setup)
-10. [Running the Notebook](#10-running-the-notebook)
+6. [Project Structure](#6-project-structure)
+7. [Environment Setup](#7-environment-setup)
+8. [Data Setup](#8-data-setup)
+9. [Running the Notebook](#9-running-the-notebook)
 
 ---
 
@@ -214,6 +213,45 @@ Rare categories are pulled toward the global mean $\bar{y}$. Unseen categories g
 
 ### 4.3 Models
 
+#### Gradient boosting: learning from residuals
+
+XGBoost, LightGBM and CatBoost are all **gradient-boosted decision trees**. Instead of one big model, they build many small trees one after another. Each new tree learns to fix the mistakes, the **residuals**, of all the trees before it.
+
+The models predict the log price $y = \log(1 + \text{TargetValue})$, so minimising squared error on $y$ is the same as minimising RMSLE.
+
+**Step 1: start with a simple guess.** Every machine is first predicted at the average log price:
+
+```math
+F_0(x) = \bar{y}
+```
+
+**Step 2: measure what is still wrong.** At each round $m$, compute every row's residual, the gap between the true value and the current prediction:
+
+```math
+r_i = y_i - F_{m-1}(x_i)
+```
+
+**Step 3: fit a tree to the residuals.** A new small tree $f_m$ is trained to predict these residuals. It does not learn the price itself, only the error that remains.
+
+**Step 4: update the model.** Add the new tree, scaled down by the learning rate $\eta$:
+
+```math
+F_m(x) = F_{m-1}(x) + \eta \cdot f_m(x)
+```
+
+Steps 2–4 repeat for thousands of rounds. The learning rate is small ($\eta$ = 0.018–0.02), so each tree fixes only about 2% of the remaining error. Many small corrections generalise better than a few large ones. Training stops early once the validation-fold score has not improved for 300 rounds. The final prediction is converted back to a price with $\text{expm1}$.
+
+The three libraries follow this same recipe but grow their trees differently:
+
+| | XGBoost | LightGBM | CatBoost |
+|---|---|---|---|
+| Tree growth | Level by level, limited by `max_depth` | Leaf by leaf (best split first), limited by `num_leaves` | Symmetric trees: the same split across a whole level |
+| Regularisation used | `reg_lambda`, `reg_alpha`, `min_child_weight` | `reg_lambda`, `min_child_samples` | `l2_leaf_reg` |
+
+Because their trees are built differently, the three models make partly different errors. That is why stacking them helps (Section 4.4).
+
+#### Model settings
+
 All three models use up to 12,000 trees, a learning rate of 0.018, seed 42 and early stopping after 300 rounds without improvement on the validation fold.
 
 | Model | Baseline parameters | Search grid (`RandomizedSearchCV`, 5 candidates × 5 folds) |
@@ -271,20 +309,7 @@ On the leaderboard the stacked submission scores **0.19296**, about 0.005 better
 
 ---
 
-## 6. Observations and Limitations
-
-- **The tuning scores are optimistic.** Inside the tuning function, the target encoder is fitted on the full training set before `RandomizedSearchCV` runs. Each validation fold has therefore already contributed to its own encodings. After retraining with in-fold encoding, the large search gains mostly disappear. XGBoost goes from 0.20161 to 0.20189, which is slightly worse. LightGBM goes from 0.20215 to 0.20169. Fitting the encoder inside the search (for example in a scikit-learn `Pipeline`) would give more reliable tuning scores.
-- **Minor preprocessing leakage.** The median imputer and the ordinal encoder are fitted on the full training set before cross-validation. The effect is likely small.
-- **LightGBM did not converge.** LightGBM used nearly all 12,000 trees in every fold. A higher learning rate or a larger tree budget may help.
-- **CatBoost is the weakest model.** It receives ordinal codes as plain numbers (no `cat_features`). Its native categorical handling was not used in this pipeline.
-- **Small tuning search.** Only 5 random candidates per model were tried, from narrow grids around the baseline.
-- **Shuffled K-fold mixes years.** Validating on later sale dates would better match how a pricing model is used.
-- **Only the final ensemble has a leaderboard score.** The single-model and tuning results are cross-validation scores only.
-- **Pandas 3 skips the `"Unknown"` fill.** Selecting columns with `dtypes == "object"` finds no columns under pandas 3, so missing descriptive values are encoded as −1 instead. Using `select_dtypes(include=["object", "string"])` would restore the intended behaviour.
-
----
-
-## 7. Project Structure
+## 6. Project Structure
 
 ```text
 heavy_equipment/
@@ -317,7 +342,7 @@ The datasets (`*.csv`), model files, CatBoost logs (`catboost_info/`) and the vi
 
 ---
 
-## 8. Environment Setup
+## 7. Environment Setup
 
 The project uses a Python virtual environment created inside the project directory.
 
@@ -377,7 +402,7 @@ The output should point to the project's virtual environment:
 
 ---
 
-## 9. Data Setup
+## 8. Data Setup
 
 The competition datasets are kept locally and are not committed to Git. Place `train.csv`, `test.csv` and `metadata.csv` in the **project root**. The notebooks read them from there (`../train.csv` relative to `notebooks/`).
 
@@ -393,7 +418,7 @@ heavy_equipment/
 
 ---
 
-## 10. Running the Notebook
+## 9. Running the Notebook
 
 With the virtual environment activated, open `notebooks/model_development.ipynb` in VS Code or Jupyter, select the project kernel and run all cells.
 
