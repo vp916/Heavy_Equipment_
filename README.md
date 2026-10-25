@@ -20,7 +20,7 @@ The pipeline:
 1. Explores and visualises the data.
 2. Builds features from dates, machine age, usage hours, the functional classification label and measurement strings.
 3. Trains XGBoost, LightGBM and CatBoost with 5-fold cross-validation. Smoothed target encoding is fitted inside each training fold.
-4. Tunes each model with `RandomizedSearchCV`.
+4. Tunes each model with `RandomizedSearchCV`. The target encoder sits inside the search's `Pipeline`, so it is refitted inside every fold here too.
 5. Combines the three models' out-of-fold predictions with a Ridge meta-model (stacking).
 6. Writes `submission.csv` for the test set.
 
@@ -31,13 +31,13 @@ The work was split by model. Each model was first developed and tuned in its own
 | **Task** | Tabular regression · 138,701 training and 15,000 test transactions |
 | **Metric** | Root Mean Squared Logarithmic Error (lower is better) |
 | **Models** | XGBoost, LightGBM, CatBoost → Ridge stacking (5-fold) |
-| **Best single model (5-fold CV)** | LightGBM (tuned): 0.20169 |
-| **Stacked ensemble (5-fold OOF)** | **0.19805** |
-| **Leaderboard (held-out test)** | **0.19296** |
+| **Best single model (5-fold CV)** | LightGBM (tuned): 0.20025 |
+| **Stacked ensemble (5-fold OOF)** | **0.19677** |
+| **Leaderboard (held-out test)** | **0.19099** |
 
 ![Cross-validation RMSLE across milestones](assets/experiment_progression.png)
 
-The blue line shows the leak-free 5-fold CV score at each milestone. The hollow markers show what the hyperparameter search reported. The search fits the target encoder on all rows, so validation rows have already contributed to their own encodings. Once the models were retrained with the encoder fitted inside each fold, most of the apparent tuning gain disappeared. The largest real improvement came from stacking the three models.
+The blue line shows the 5-fold CV score at each milestone, and the grey line shows the same steps in the first version of the pipeline. The hollow markers show the best score of the hyperparameter search. The search is leak-free and uses a fixed tree count, so it found little to gain: XGBoost and CatBoost kept their parameters, and LightGBM improved by 0.0001. The gains over the first version came from fixing the model settings (Section 5.4). The largest single step is still stacking the three models.
 
 ---
 
@@ -140,7 +140,7 @@ A missing component value therefore usually means *not applicable to this machin
 | Model code + manufacture year | 0.300 |
 | Model code + manufacture year + sale year + region | 0.144 |
 
-Even when model code, manufacture year, sale year and region all match, the price still varies by about 0.14 in log space. That is roughly ±15% for otherwise identical machines. Only 46% of rows have such a match at all. 6,792 rows are exact duplicates of another row on every feature. In 71% of these 2,954 duplicate groups the machines sold at different prices, in one case 4.7 times apart. No model can resolve that difference. For comparison, the final ensemble reaches an RMSLE of 0.198.
+Even when model code, manufacture year, sale year and region all match, the price still varies by about 0.14 in log space. That is roughly ±15% for otherwise identical machines. Only 46% of rows have such a match at all. 6,792 rows are exact duplicates of another row on every feature. In 71% of these 2,954 duplicate groups the machines sold at different prices, in one case 4.7 times apart. No model can resolve that difference. For comparison, the final ensemble reaches an RMSLE of 0.197.
 
 **8. A changing market.** The median sale price moves with the economic cycle: \$31,000 in 1990, \$43,000 in 1992, \$32,500 in 2003, \$40,000 in 2007 and \$31,500 in 2010. The same machine is worth different amounts in different years. Sale-date features are therefore essential, and the model has to separate the market trend from depreciation.
 
@@ -239,28 +239,32 @@ r_i = y_i - F_{m-1}(x_i)
 F_m(x) = F_{m-1}(x) + \eta \cdot f_m(x)
 ```
 
-Steps 2–4 repeat for thousands of rounds. The learning rate is small ($\eta$ = 0.018–0.02), so each tree fixes only about 2% of the remaining error. Many small corrections generalise better than a few large ones. Training stops early once the validation-fold score has not improved for 300 rounds. The final prediction is converted back to a price with $\text{expm1}$.
+Steps 2–4 repeat for thousands of rounds. The learning rate is small ($\eta$ = 0.02 for XGBoost and LightGBM, 0.05 for CatBoost), so each tree fixes only a few percent of the remaining error. Many small corrections generalise better than a few large ones. Training stops early once the validation-fold score has not improved for 300 rounds. The final prediction is converted back to a price with $\text{expm1}$.
 
 The three libraries follow this same recipe but grow their trees differently:
 
 | | XGBoost | LightGBM | CatBoost |
 |---|---|---|---|
-| Tree growth | Level by level, limited by `max_depth` | Leaf by leaf (best split first), limited by `num_leaves` | Symmetric trees: the same split across a whole level |
+| Tree growth | Leaf by leaf (`grow_policy="lossguide"`), limited by `max_leaves` | Leaf by leaf (best split first), limited by `num_leaves` | Symmetric trees: the same split across a whole level |
 | Regularisation used | `reg_lambda`, `reg_alpha`, `min_child_weight` | `reg_lambda`, `min_child_samples` | `l2_leaf_reg` |
+| Input | Ordinal + target-encoded features | Ordinal + target-encoded features | Ordinal features |
 
-Because their trees are built differently, the three models make partly different errors. That is why stacking them helps (Section 4.4).
+XGBoost and LightGBM grow their trees in a similar way on the same inputs. CatBoost, with symmetric trees on ordinal features, gives the most different view. Because the models still make partly different errors, stacking them helps (Section 4.4).
 
 #### Model settings
 
-All three models use up to 12,000 trees, a learning rate of 0.018, seed 42 and early stopping after 300 rounds without improvement on the validation fold.
+All three models use seed 42 and early stopping after 300 rounds without improvement on the validation fold. XGBoost and LightGBM use a learning rate of 0.02 (up to 15,000 and 12,000 trees). CatBoost uses 0.05 (up to 20,000 trees).
 
 | Model | Baseline parameters | Search grid (`RandomizedSearchCV`, 5 candidates × 5 folds) |
 |---|---|---|
-| **XGBoost** | depth 8, min child weight 5, subsample 0.85, colsample 0.85, λ 3, α 0.1, `hist` | depth {7, 8, 9}, min child weight {4, 5, 6}, lr {0.018, 0.020, 0.022}, subsample / colsample {0.82, 0.85, 0.88}, α {0.05, 0.10, 0.15}, λ {2.5, 3.0, 4.0} |
-| **LightGBM** | 80 leaves, min child samples 30, subsample 0.85, colsample 0.85, λ 3 | leaves {72, 80, 88}, min child samples {25, 30, 35}, lr {0.018, 0.020, 0.022}, subsample / colsample {0.83, 0.85, 0.87}, λ {2.5, 3.0, 3.5} |
-| **CatBoost** | depth 8, L2 5, RMSE loss | depth {7, 8, 9}, lr {0.018, 0.020, 0.022}, L2 {4, 5, 6} |
+| **XGBoost** | leaf-wise, 255 leaves, min child weight 20, subsample 0.82, colsample 0.5, λ 2.5, α 0.15, `hist` | leaves {127, 255, 383}, min child weight {10, 20, 40}, subsample {0.75, 0.82, 0.9}, colsample {0.4, 0.5, 0.6}, λ {1, 2.5, 5}, α {0.05, 0.15, 0.5} |
+| **LightGBM** | 255 leaves, min child samples 20, subsample 0.83 (every iteration), colsample 0.5, λ 3 | leaves {127, 255, 383}, min child samples {10, 20, 40}, subsample {0.75, 0.83, 0.9}, colsample {0.4, 0.5, 0.6}, λ {1, 3, 6} |
+| **CatBoost** | depth 8, L2 5, RMSE loss | depth {7, 8, 9}, L2 {3, 5, 8} |
 
-A model's tuned parameters are used only if the best search score beats its baseline CV score.
+- **Leak-free search.** The target encoder and the model are wrapped in one `Pipeline`, so the search refits the encoder inside every fold. Its scores are not optimistic.
+- **Grids centred on the current parameters,** one step either side. The learning rate is not searched, because it only matters together with the number of trees.
+- **Fixed tree counts.** `RandomizedSearchCV` cannot stop early, so each candidate uses a fixed number of trees close to where early stopping ended: XGBoost 5,000, LightGBM 5,300, CatBoost 16,000.
+- A model's tuned parameters are used only if the best search score beats its baseline CV score.
 
 ### 4.4 Validation and stacking
 
@@ -275,13 +279,13 @@ A model's tuned parameters are used only if the best search score beats its base
 
 | Fold | XGBoost | LightGBM | CatBoost |
 |---:|---:|---:|---:|
-| 1 | 0.19934 | 0.19988 | 0.20453 |
-| 2 | 0.20119 | 0.20206 | 0.20700 |
-| 3 | 0.20337 | 0.20354 | 0.20830 |
-| 4 | 0.20264 | 0.20298 | 0.20894 |
-| 5 | 0.20150 | 0.20230 | 0.20617 |
-| **Mean** | **0.20161** | **0.20215** | **0.20699** |
-| Std | 0.00138 | 0.00125 | 0.00156 |
+| 1 | 0.19845 | 0.19792 | 0.19943 |
+| 2 | 0.20021 | 0.20058 | 0.20218 |
+| 3 | 0.20224 | 0.20186 | 0.20388 |
+| 4 | 0.20142 | 0.20126 | 0.20401 |
+| 5 | 0.20068 | 0.20042 | 0.20122 |
+| **Mean** | **0.20060** | **0.20041** | **0.20214** |
+| Std | 0.00128 | 0.00135 | 0.00172 |
 
 ![Validation RMSLE across folds](assets/validation_rmsle_across_folds.png)
 
@@ -289,23 +293,45 @@ A model's tuned parameters are used only if the best search score beats its base
 
 | Model | Baseline CV | Best search score | Decision | Best parameters |
 |---|---:|---:|---|---|
-| XGBoost | 0.20161 | 0.19675 | Tuned parameters used | depth 9, lr 0.018, min child weight 4, subsample 0.82, colsample 0.88, λ 2.5, α 0.15 |
-| LightGBM | 0.20215 | 0.19800 | Tuned parameters used | 88 leaves, lr 0.02, min child samples 25, subsample 0.83, colsample 0.83, λ 3.0 |
-| CatBoost | 0.20699 | 0.20769 | Baseline kept | (depth 9, lr 0.018, L2 5 was the best candidate) |
+| XGBoost | 0.20060 | 0.20074 | Baseline kept | (255 leaves, min child weight 10, subsample 0.82, colsample 0.4, λ 5, α 0.5 was the best candidate) |
+| LightGBM | 0.20041 | 0.20032 | Tuned parameters used | 383 leaves, min child samples 10, subsample 0.75, colsample 0.4, λ 6 |
+| CatBoost | 0.20214 | 0.20219 | Baseline kept | (depth 9, L2 5 was the best candidate) |
+
+With the search leak-free, tuning changes little. The only switch, LightGBM, gains 0.00009, which is within run-to-run noise.
 
 ### 5.3 Retraining with the selected parameters and stacking
 
 | Model | 5-fold CV RMSLE |
 |---|---:|
-| XGBoost (tuned) | 0.20189 |
-| LightGBM (tuned) | 0.20169 |
-| CatBoost (baseline) | 0.20699 |
-| **Ridge stack** | **0.19805** (OOF) · 0.19804 (mean of folds) |
-| **Ridge stack, leaderboard** | **0.19296** (held-out test) |
+| XGBoost (baseline) | 0.20060 |
+| LightGBM (tuned) | 0.20025 |
+| CatBoost (baseline) | 0.20214 |
+| **Ridge stack** | **0.19677** (OOF) · 0.19676 (mean of folds) |
+| **Ridge stack, leaderboard** | **0.19099** (held-out test) |
 
-Stacking improves on the best single model (LightGBM, 0.20169) by about 0.0036 RMSLE.
+Stacking improves on the best single model (LightGBM, 0.20025) by about 0.0035 RMSLE.
 
-On the leaderboard the stacked submission scores **0.19296**, about 0.005 better than its CV score. Cross-validation is therefore a conservative estimate. If target information were leaking into the validation folds, the CV score would be the optimistic one instead.
+On the leaderboard the stacked submission scores **0.19099**, about 0.006 better than its CV score. Cross-validation is therefore a conservative estimate. If target information were leaking into the validation folds, the CV score would be the optimistic one instead.
+
+### 5.4 Changes from the first version
+
+The features, folds and stacking are unchanged. Only the model settings and the tuning step changed:
+
+| Change | Why |
+|---|---|
+| **CatBoost:** up to 20,000 iterations at learning rate 0.05 (was 12,000 at 0.018) | The first version stopped at the 12,000 cap in every fold (best iteration 11,999), so CatBoost was still improving and early stopping never triggered. It now stops on its own between about 14,000 and 19,000 iterations (measured in a separate run with the same settings, which gave identical fold scores). |
+| **Column sampling 0.5** for XGBoost and LightGBM (was 0.85) | Many columns overlap: the target-encoded specification codes, the functional classification, the year and the age. With half the columns per tree, the trees cannot all lean on the same few columns. |
+| **Bigger trees:** 255 leaves for both (XGBoost grows leaf-wise instead of depth 8; LightGBM had 80 leaves) | Captures interactions such as model code × age × sale year |
+| **LightGBM `subsample_freq=1`** | Without it LightGBM ignores `subsample`, so the first version never sampled rows |
+| **Leak-free tuning** | The first search fitted the target encoder on all rows, so its scores were optimistic (e.g. XGBoost 0.19675 reported, 0.20189 after retraining). The encoder now sits inside the search's `Pipeline`. |
+
+| | First version | This version |
+|---|---:|---:|
+| XGBoost | 0.20189 | 0.20060 |
+| LightGBM | 0.20169 | 0.20025 |
+| CatBoost | 0.20699 | 0.20214 |
+| **Ridge stack (OOF)** | 0.19805 | **0.19677** |
+| **Leaderboard** | 0.19296 | **0.19099** |
 
 ---
 
@@ -427,33 +453,33 @@ The notebook:
 1. Loads and explores the data.
 2. Builds features and encodes the data.
 3. Trains the baseline XGBoost, LightGBM and CatBoost models with 5-fold CV.
-4. Tunes each model with `RandomizedSearchCV`.
+4. Tunes each model with `RandomizedSearchCV` (leak-free, see Section 4.3).
 5. Retrains with the selected parameters.
 6. Fits the Ridge stacking model.
 7. Writes `notebooks/submission.csv` (15,000 rows: `TransactionID, TargetValue`).
 
-Training runs on the CPU. No GPU is needed. Hyperparameter tuning is the slowest step: each fit takes between about 30 seconds and 1.7 minutes, and each model runs 25 fits.
+Training runs on the CPU. No GPU is needed. Hyperparameter tuning is the slowest step: each model runs 25 fits, about 30 seconds to 1.6 minutes each for XGBoost and LightGBM and 2 to 3.5 minutes each for CatBoost (about 2 hours in total on a 12-thread CPU).
 
 ### Output of a full run
 
-**Stacking.** The Ridge meta-model scores the same on its training and validation folds (both average 0.19804). This means the stacking step itself does not overfit:
+**Stacking.** The Ridge meta-model scores the same on its training and validation folds (both average 0.19676). This means the stacking step itself does not overfit:
 
 | Fold | Train RMSLE | Validation RMSLE |
 |---:|---:|---:|
-| 1 | 0.19866 | 0.19556 |
-| 2 | 0.19815 | 0.19761 |
-| 3 | 0.19759 | 0.19986 |
-| 4 | 0.19770 | 0.19939 |
-| 5 | 0.19810 | 0.19780 |
-| **Overall OOF** | | **0.19805** |
+| 1 | 0.19736 | 0.19433 |
+| 2 | 0.19680 | 0.19657 |
+| 3 | 0.19635 | 0.19839 |
+| 4 | 0.19646 | 0.19795 |
+| 5 | 0.19681 | 0.19655 |
+| **Overall OOF** | | **0.19677** |
 
-**Early stopping.** In the retraining run, the tuned XGBoost stopped after 5,566 to 6,416 trees. LightGBM used 11,860 to 11,998 of its 12,000 trees in every fold, so it was still improving when the budget ran out.
+**Early stopping.** In the retraining run, XGBoost stopped after about 5,200 to 6,000 trees and the tuned LightGBM after 3,578 to 4,989, both well before their limits.
 
 **Submission.** `submission.csv` has 15,000 rows with one prediction per `TransactionID` and no missing values. The predicted prices follow the shape of the training target closely:
 
 | | Min | 25% | Median | Mean | 75% | Max |
 |---|---:|---:|---:|---:|---:|---:|
 | Training `TargetValue` | \$7,500 | \$20,500 | \$35,000 | \$41,522 | \$57,000 | \$142,000 |
-| Predicted (test) | \$7,226 | \$20,873 | \$34,578 | \$40,923 | \$56,115 | \$144,110 |
+| Predicted (test) | \$7,314 | \$20,864 | \$34,625 | \$40,915 | \$56,139 | \$144,337 |
 
 The predicted distribution is slightly narrower (standard deviation \$25,050 vs \$26,361). This is expected: averaging three models and five folds pulls the most extreme predictions toward the middle.
