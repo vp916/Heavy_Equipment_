@@ -11,10 +11,10 @@ st.markdown("Predicting the resale price of used heavy machinery with a stacked 
             "XGBoost, LightGBM and CatBoost.")
 
 c1, c2, c3, c4 = st.columns(4)
-c1.metric("Training sales", "138,701")
-c2.metric("Test sales", "15,000")
-c3.metric("Stacked model, 5-fold CV RMSLE", "0.19677")
-c4.metric("Leaderboard RMSLE", "0.19099")
+c1.metric("Training sales", "138,701", help="Past sales with known prices in train.csv. The models learn from these.")
+c2.metric("Test sales", "15,000", help="Sales in test.csv whose prices we predict. Their true prices are only known to the leaderboard.")
+c3.metric("Stacked model, 5-fold CV RMSLE", "0.19677", help="Error of the final stacked model measured with 5-fold cross-validation: every training sale is predicted by a model that never saw it. Lower is better; 0.197 means a typical error of about ±20%.")
+c4.metric("Leaderboard RMSLE", "0.19099", help="The score of our submission on the hidden test prices. Slightly better than the CV score, which shows the validation was honest.")
 
 st.divider()
 

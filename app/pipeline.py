@@ -1,7 +1,7 @@
 """Preprocessing and prediction for the Streamlit app.
 
-The classes and functions below are copied from notebooks/model_development.ipynb
-(cells 23, 24, 25, 33 and 34) so that a single row typed into the app is
+The classes and functions below are copied from the feature engineering part of
+notebooks/model_development.ipynb, so that a single row typed into the app is
 transformed exactly like the training data.
 """
 import re
@@ -18,7 +18,6 @@ ROOT = Path(__file__).resolve().parent
 ARTIFACTS = ROOT / "artifacts"
 
 
-# ---------------------------------------------------------------- notebook cell 23
 class SmoothedTargetEncoder(BaseEstimator, TransformerMixin):
 
     def __init__(self, columns, alpha=15):
@@ -55,7 +54,6 @@ class SmoothedTargetEncoder(BaseEstimator, TransformerMixin):
         return X
 
 
-# ---------------------------------------------------------------- notebook cell 24
 def parse_functional_classification(df):
 
     if "FunctionalClassification" not in df.columns:
@@ -90,7 +88,6 @@ def parse_functional_classification(df):
     return data
 
 
-# ---------------------------------------------------------------- notebook cell 25
 def clean_machine_measurements(df):
 
     data = df.copy()
@@ -148,7 +145,6 @@ def clean_machine_measurements(df):
     return data
 
 
-# ---------------------------------------------------------------- notebook cell 33
 def feature_engineering(df, fill_cols, machine_cols):
     df = df.copy()
     df.drop(columns=["TransactionID", "InventoryGroupCategory", "col18", "col19"], errors="ignore", inplace=True)
@@ -181,7 +177,6 @@ def feature_engineering(df, fill_cols, machine_cols):
     return df
 
 
-# ---------------------------------------------------------------- notebook cell 34
 class DataTransformer:
 
     def __init__(self, num_strategy="median"):
@@ -223,7 +218,7 @@ class DataTransformer:
         return self.fit(X).transform(X)
 
 
-# ---------------------------------------------------------------- app helpers
+# Helpers used by the app
 def preprocess(raw, fill_cols, machine_cols, transformer):
     """Raw rows (same columns as train.csv) -> model features, as in notebook cells 35-36."""
     data = parse_functional_classification(raw)

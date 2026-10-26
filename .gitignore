@@ -42,6 +42,7 @@ notebooks/train_model.py
 
 models/
 app/artifacts/
+outputs/
 *.pkl
 *.pickle
 *.joblib

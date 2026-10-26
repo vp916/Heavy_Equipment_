@@ -10,10 +10,10 @@ st.title("The models")
 st.markdown("Three gradient-boosted tree models, each predicting `log1p(price)`, combined by a Ridge regression.")
 
 c1, c2, c3, c4 = st.columns(4)
-c1.metric("XGBoost CV", "0.20060")
-c2.metric("LightGBM CV (tuned)", "0.20025")
-c3.metric("CatBoost CV", "0.20214")
-c4.metric("Ridge stack CV", "0.19677", delta="-0.00348 vs best single", delta_color="inverse")
+c1.metric("XGBoost CV", "0.20060", help="5-fold cross-validated RMSLE of XGBoost on its own (baseline settings kept after tuning).")
+c2.metric("LightGBM CV (tuned)", "0.20025", help="5-fold cross-validated RMSLE of LightGBM with the tuned settings. The best single model.")
+c3.metric("CatBoost CV", "0.20214", help="5-fold cross-validated RMSLE of CatBoost on its own. The weakest alone, but the most useful in the stack.")
+c4.metric("Ridge stack CV", "0.19677", delta="-0.00348 vs best single", delta_color="inverse", help="The three models combined by a Ridge regression. Green because lower RMSLE is better.")
 
 st.subheader("How boosting works")
 st.markdown("All three start from the average log price and then add thousands of small trees. Each new tree "

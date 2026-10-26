@@ -109,7 +109,7 @@ joblib.dump({
 }, ARTIFACTS / "pipeline.joblib")
 print(f"artifacts saved ({time.time() - t0:.0f}s)", flush=True)
 
-# ---- checks: reload from disk exactly like the app does
+# Checks: reload the saved files exactly like the app does
 bundle = load_artifacts()
 pred = predict(testData[raw_cols], bundle)
 

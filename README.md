@@ -375,8 +375,17 @@ heavy_equipment/
 │   │   ├── 3_Models.py
 │   │   └── 4_Predict.py
 │   ├── pipeline.py                          # the notebook's preprocessing + prediction
+│   ├── common.py                            # cached data/models and formatting helpers shared by the pages
 │   ├── export_artifacts.py                  # refits the final models on all data and saves them
 │   └── artifacts/                           # saved models (not tracked)
+│
+├── scripts/                                 # the notebook's pipeline as Python scripts (Section 9)
+│   ├── config.py                            # paths and every setting: model parameters, grids, seeds
+│   ├── features.py                          # data loading, feature engineering, encoders
+│   ├── train.py                             # model definitions and the 5-fold CV training loop
+│   ├── tune.py                              # leak-free RandomizedSearchCV
+│   ├── stack.py                             # Ridge stacking and the submission file
+│   └── run_pipeline.py                      # runs everything, entry point
 │
 ├── notebooks/
 │   ├── model_development.ipynb              # final pipeline: EDA → features → 3 models → tuning → stacking → submission
@@ -392,9 +401,10 @@ heavy_equipment/
 - `notebooks/model_development.ipynb` is the main notebook. It combines the three models, their tuning and the stacking step, and writes `submission.csv`.
 - `notebooks/versions/` holds the single-model notebooks the final pipeline was built from. They share the same EDA and feature-engineering steps, and each one trains and tunes one model. The team developed them in parallel, one notebook per member. See [`notebooks/versions/README.md`](notebooks/versions/README.md) for their scores.
 
+- `scripts/` contains the same pipeline as the notebook as plain Python modules, so it can be run with one command.
 - `app/` is the Streamlit front end. It reuses the notebook's preprocessing code and the final models (Section 10).
 
-The datasets (`*.csv`), model files (including `app/artifacts/`), CatBoost logs (`catboost_info/`) and the virtual environment are excluded from Git through `.gitignore`.
+The datasets (`*.csv`), model files (including `app/artifacts/`), script outputs (`outputs/`), CatBoost logs (`catboost_info/`) and the virtual environment are excluded from Git through `.gitignore`.
 
 ---
 
@@ -490,6 +500,28 @@ The notebook:
 
 Training runs on the CPU. No GPU is needed. Hyperparameter tuning is the slowest step: each model runs 25 fits, about 30 seconds to 1.6 minutes each for XGBoost and LightGBM and 2 to 3.5 minutes each for CatBoost (about 2 hours in total on a 12-thread CPU).
 
+### Running the scripts instead
+
+`scripts/` holds the same pipeline as plain Python, without the EDA plots. From the project root:
+
+```bash
+python scripts/run_pipeline.py                  # full run in the notebook's order: baseline, tuning, retraining, stacking (about 2 hours)
+python scripts/run_pipeline.py --skip-tuning    # train once with the parameters tuning chose in the notebook (about 30-40 minutes)
+```
+
+Both write `outputs/submission.csv` and each model's out-of-fold and test predictions (`outputs/*_oof.npy`, `outputs/*_test.npy`).
+
+| File | What it contains |
+|---|---|
+| `config.py` | Paths and every setting in one place: fixed and tunable model parameters, search grids, seeds, the target-encoding alpha. `SELECTED_PARAMS` holds what tuning chose in the notebook (only LightGBM changed) |
+| `features.py` | `SmoothedTargetEncoder`, `parse_functional_classification`, `clean_machine_measurements`, `feature_engineering`, `DataTransformer`, and `prepare_data()`, which loads the CSVs and returns `X`, `y_log`, `X_test` and the target-encoded columns |
+| `train.py` | `build_models()` and `train_models()`, the 5-fold CV loop with in-fold target encoding and early stopping |
+| `tune.py` | `tune_model()` with the encoder inside a `Pipeline`, and the search versions of the models with fixed tree counts |
+| `stack.py` | Ridge stacking with its own 5-fold CV, the final Ridge weights and `write_submission()` |
+| `run_pipeline.py` | Runs the steps above in order |
+
+The code is the notebook's code, organised into functions. Running the notebook's own cells side by side with the scripts gives identical `X`, `X_test`, `y_log` and target-encoded columns, and identical parameters for every model, search model and grid. The only addition is the `.reindex(columns=[0, 1])` in `parse_functional_classification`, which makes it work on a single row and does not change the output on the full data.
+
 ### Output of a full run
 
 **Stacking.** The Ridge meta-model scores the same on its training and validation folds (both average 0.19676). This means the stacking step itself does not overfit:
@@ -525,10 +557,10 @@ The `app/` folder holds a Streamlit front end for the project. It explains the d
 | Page | Contents |
 |---|---|
 | **Home** | The problem, the RMSLE metric, why the target is log-transformed, headline scores |
-| **Data** | Column groups and the main data challenges: placeholder years, block-wise missing values, rare model codes, disguised missing values, the noise floor and the changing market |
-| **Pipeline** | Flow diagram from the raw CSV to the final price, with an explanation of every step |
+| **Data** | Column groups and the main data challenges: placeholder years, block-wise missing values, rare model codes, disguised missing values, the noise floor and the changing market. A **Browse the data** tab filters all 138,701 sales (machine type, region, model code, year, price), sorts them and shows them 20 rows per page, either raw or after feature engineering |
+| **Pipeline** | Flow diagram from the raw CSV to the final price, with an explanation of every step, and a walkthrough that follows one real sale through every step: raw values, parsed features, engineered features, encoding, each model's prediction and the final price next to the actual price |
 | **Models** | Model settings, fold scores, tuning decisions, Ridge weights and the progression chart |
-| **Predict** | Pick a machine type and model code, change the manufacture year, hours, sale date, region, cab and drivetrain, and get the predicted price with each model's own prediction, a typical range and a depreciation curve. A second mode prices real sales from the test set |
+| **Predict** | Pick a machine type and model code, change the manufacture year, hours, sale date, region, cab and drivetrain, and get the predicted price with each model's own prediction, a typical range, a plain-language "Why this price?" explanation, the model code's past sales and a depreciation curve. A second mode prices real sales from the test set |
 
 ### Running the app
 
@@ -540,7 +572,8 @@ streamlit run app/Home.py          # then open http://localhost:8501
 ```
 
 - Run both commands from the project root. Streamlit reads the theme from `.streamlit/config.toml` in the folder it is started from.
-- Home, Data, Pipeline and Models work without the export step. Only Predict needs the saved models.
+- The overview pages work without the export step. Predict, the one-sale walkthrough and the "after feature engineering" view of the data browser need the saved models; the data browser and the model-code history also read `train.csv` from the project root.
+- Every input and headline number has a hover help (ⓘ) that explains what it means.
 - The saved models take 382 MB and are not tracked by Git (`lgb.txt` and `xgb.ubj` are also larger than GitHub's 100 MB file limit), so every fresh clone runs `export_artifacts.py` once. Loading them takes about 1 GB of RAM.
 
 ### How the Predict page works
