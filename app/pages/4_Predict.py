@@ -5,8 +5,10 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-from common import UNKNOWN_YEARS, artifacts_ready, get_bundle, model_code_stats, money, signed_money
-from pipeline import predict
+from common import (UNKNOWN_YEARS, artifacts_ready, fmt, get_bundle, get_importance, group_contents,
+                    model_code_stats, money, signed_money)
+from pipeline import (clean_machine_measurements, feature_engineering, parse_functional_classification, predict,
+                      stack_shap)
 
 st.set_page_config(page_title="Predict · Heavy Equipment", page_icon="🚜", layout="wide")
 st.title("Predict a sale price")
@@ -215,6 +217,75 @@ with hist_col:
             st.caption("Half of all past sales of this model sold within the middle-half range.")
     elif stats is None:
         st.caption("Put train.csv in the project folder to see this model code's past sales.")
+
+# The model's own breakdown (SHAP values)
+@st.cache_data(show_spinner="Computing the breakdown (a few seconds)…", max_entries=100)
+def breakdown(key, _row):
+    """SHAP contributions of the stacked model for one row, plus readable feature values. `key` identifies the row."""
+    raw = _row[bundle["raw_cols"]].astype(bundle["raw_dtypes"])
+    readable = feature_engineering(clean_machine_measurements(parse_functional_classification(raw)),
+                                   bundle["fill_cols"], bundle["machine_cols"])
+    X = bundle["transformer"].transform(readable)[bundle["feature_cols"]]
+    contributions, base = stack_shap(X, bundle)
+    values = {f: readable[f].iloc[0] if f in readable.columns else X[f].iloc[0] for f in bundle["feature_cols"]}
+    return pd.Series(contributions[0], index=bundle["feature_cols"]), base, values
+
+
+st.subheader("How each feature moved this prediction")
+show_breakdown = st.toggle("Show the model's own breakdown",
+                           help="Uses SHAP values: the stacked model's prediction split into one contribution per "
+                                "feature. Takes a few seconds the first time for each machine.")
+if show_breakdown:
+    contributions, base, values = breakdown(row.to_json(), row)
+    importance = get_importance()
+    effect = lambda log_value: np.exp(log_value) - 1   # a log-price contribution as a % change of the price
+
+    st.markdown(f"The model starts from the average training sale, about **{money(np.expm1(base))}**. Each feature "
+                f"then raises or lowers that price by a percentage, and together they give the prediction of "
+                f"**{money(result['price'])}**.")
+
+    if importance is not None:
+        by_group = contributions.groupby(importance["group_of"]).sum()
+        chart_data = pd.DataFrame({"Group": by_group.index, "Effect": effect(by_group.values)})
+        chart_data["Direction"] = np.where(chart_data["Effect"] >= 0, "raises the price", "lowers the price")
+        chart_data["Label"] = chart_data["Effect"].map(lambda v: "±0.0%" if abs(v) < 0.0005 else f"{v:+.1%}")
+        order = chart_data.sort_values("Effect", ascending=False)["Group"].tolist()
+        bars = alt.Chart(chart_data).encode(
+            y=alt.Y("Group:N", sort=order, title=None,
+                    axis=alt.Axis(labelLimit=260)),
+            x=alt.X("Effect:Q", title="Effect on the price", axis=alt.Axis(format="%")),
+        )
+        st.altair_chart(
+            (bars.mark_bar(cornerRadiusEnd=3, height=18).encode(
+                color=alt.Color("Direction:N", scale=alt.Scale(domain=["raises the price", "lowers the price"],
+                                                               range=["#2a78d6", "#eb6834"]),
+                                legend=alt.Legend(title=None, orient="top")),
+                tooltip=[alt.Tooltip("Group:N"), alt.Tooltip("Label:N", title="Effect")])
+             + alt.Chart(pd.DataFrame({"x": [0]})).mark_rule(color="#8a877f").encode(x="x:Q")
+             + bars.transform_filter(alt.datum.Effect >= 0).mark_text(align="left", dx=4, fontSize=11,
+                                                                       color="#3a3935").encode(text="Label:N")
+             + bars.transform_filter(alt.datum.Effect < 0).mark_text(align="right", dx=-4, fontSize=11,
+                                                                      color="#3a3935").encode(text="Label:N")
+             ).properties(height=34 * len(chart_data) + 40),
+            width="stretch")
+        st.caption("Feature groups as on the Models page. The effects multiply: the average price × (1 + each effect) "
+                   "gives the prediction.")
+        with st.expander("Which columns are in each group?"):
+            contents = group_contents(importance).drop(columns="Share")
+            contents.insert(1, "Effect here", ["±0.0%" if abs(effect(by_group[g])) < 0.0005
+                                                else f"{effect(by_group[g]):+.1%}" for g in contents["Group"]])
+            st.table(contents.set_index("Group"))
+
+    top = contributions.reindex(contributions.abs().sort_values(ascending=False).index).head(10)
+    st.markdown("**The 10 features with the biggest effect**")
+    st.dataframe(pd.DataFrame({
+        "Feature": top.index,
+        "Value for this machine": [fmt(values[f]) for f in top.index],
+        "Effect on the price": ["±0.0%" if abs(effect(v)) < 0.0005 else f"{effect(v):+.1%}" for v in top.values],
+    }), hide_index=True, width="stretch")
+    st.caption("Values are shown after feature engineering, e.g. AssetAge is computed from the two dates. A feature "
+               "can push the price down even if it sounds positive: the effect is always relative to the average sale.")
+
 
 # Depreciation curve
 st.subheader("How the price changes with manufacture year")

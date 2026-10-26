@@ -347,6 +347,33 @@ The features, folds and stacking are unchanged. Only the model settings and the 
 | **Ridge stack (OOF)** | 0.19805 | **0.19677** |
 | **Leaderboard** | 0.19296 | **0.19099** |
 
+### 5.5 Feature importance
+
+Which features does the final model rely on? This is measured with **SHAP values**. For one prediction, SHAP splits the predicted log price into a base value (the average prediction) plus one contribution per feature, and the contributions add up exactly to the prediction. They come from Shapley values in game theory, the fair way to split a shared result between players, and for tree models they can be computed exactly (TreeSHAP). XGBoost, LightGBM and CatBoost all have this built in.
+
+The Ridge stack is a weighted sum of the three models, so the stack's contribution of a feature is the same weighted sum of the three models' contributions (0.249 × XGBoost + 0.327 × LightGBM + 0.430 × CatBoost). The importance of a feature is the average size of its contribution over 2,000 random training sales.
+
+![Feature importance](assets/feature_importance.png)
+
+| Feature group | Share | Columns in the group |
+|---|---:|---|
+| Model identity | 30.1% | `Spec_FullDescriptor`, `Spec_BaseClass`, `Spec_SubClass`, `Spec_ReleaseSeries`, `Spec_VariantModifier`, `ProductConfigID`, `Missing_BaseClass` |
+| Age | 22.9% | `ManufactureYear`, `AssetAge`, `ManufactureYearMissing` |
+| Machine type and size | 21.1% | `InventoryGroupDescription`, `FunctionalClassification`, `AssetScaleFactor`, `FC_MachineFamily`, `FC_DriveType`, `FC_LowerBound`, `FC_UpperBound`, `FC_Unit`, `FC_IsPlusRange`, `FC_RangeKnown` |
+| Sale date | 10.4% | `TransactionYear`, `TransactionMonth`, `TransactionQuarter`, `TransactionDay`, `TransactionDayOfWeek` |
+| Components | 7.9% | `CabinType`, `DrivetrainType`, `Forks`, the component columns `col1`, `col3`–`col6`, `col8`–`col14`, `col16`, `col20`, `col23`–`col25`, `col27`–`col30`, and the parsed measurements `col7_Numeric_Feet`, `col15_Numeric_Inches`, `col21_Numeric_Inches`, `col22_Total_Inches` |
+| Usage | 4.2% | `OperationalHoursMeter`, `OperationalHoursLog`, `HoursPerYear`, `HoursMissing`, `UtilizationTier` |
+| Region | 1.8% | `RegionCode` |
+| Seller and data source | 1.7% | `VendorPartnerID`, `DataOriginCode` |
+
+Together these are all 61 features, each in exactly one group.
+
+- **What the machine is, how old it is and how big it is** account for three quarters of the model's decisions. The single most important features are the model code (`Spec_FullDescriptor`) and the age (`AssetAge`).
+- **The sale year matters on its own** (10.4%): the same machine is worth different amounts in different market years, as the data challenges in Section 2 showed.
+- **Usage counts for little** (4.2%), because about two thirds of the hour-meter readings are missing or 0.
+- Related features share the credit between them (for example `ManufactureYear` and `AssetAge` carry almost the same information), which is why the groups are easier to read than single features.
+- SHAP shows what the models **rely on**, not what causes prices. The values come from the app's final models (Section 10), which were trained on all sales, and are computed on training sales; the cross-validation score remains the measure of accuracy on new data.
+
 ---
 
 ## 6. Project Structure
@@ -365,7 +392,8 @@ heavy_equipment/
 │   ├── manufacture_year_distribution.png
 │   ├── missing_data_map.png
 │   ├── validation_rmsle_across_folds.png
-│   └── streamlit_predict.png
+│   ├── streamlit_predict.png
+│   └── feature_importance.png
 │
 ├── app/                                     # Streamlit app (Section 10)
 │   ├── Home.py                              # overview page, entry point
@@ -377,6 +405,7 @@ heavy_equipment/
 │   ├── pipeline.py                          # the notebook's preprocessing + prediction
 │   ├── common.py                            # cached data/models and formatting helpers shared by the pages
 │   ├── export_artifacts.py                  # refits the final models on all data and saves them
+│   ├── compute_importance.py                # SHAP feature importance of the saved models (Section 5.5)
 │   └── artifacts/                           # saved models (not tracked)
 │
 ├── scripts/                                 # the notebook's pipeline as Python scripts (Section 9)
@@ -559,8 +588,8 @@ The `app/` folder holds a Streamlit front end for the project. It explains the d
 | **Home** | The problem, the RMSLE metric, why the target is log-transformed, headline scores |
 | **Data** | Column groups and the main data challenges: placeholder years, block-wise missing values, rare model codes, disguised missing values, the noise floor and the changing market. A **Browse the data** tab filters all 138,701 sales (machine type, region, model code, year, price), sorts them and shows them 20 rows per page, either raw or after feature engineering |
 | **Pipeline** | Flow diagram from the raw CSV to the final price, with an explanation of every step, and a walkthrough that follows one real sale through every step: raw values, parsed features, engineered features, encoding, each model's prediction and the final price next to the actual price |
-| **Models** | Model settings, fold scores, tuning decisions, Ridge weights and the progression chart |
-| **Predict** | Pick a machine type and model code, change the manufacture year, hours, sale date, region, cab and drivetrain, and get the predicted price with each model's own prediction, a typical range, a plain-language "Why this price?" explanation, the model code's past sales and a depreciation curve. A second mode prices real sales from the test set |
+| **Models** | Model settings, fold scores, tuning decisions, Ridge weights, the progression chart and the SHAP feature importance (by feature group and the top 20 features) |
+| **Predict** | Pick a machine type and model code, change the manufacture year, hours, sale date, region, cab and drivetrain, and get the predicted price with each model's own prediction, a typical range, a plain-language "Why this price?" explanation, the model code's past sales, the model's own SHAP breakdown of the prediction (how much each feature group raised or lowered the price) and a depreciation curve. A second mode prices real sales from the test set |
 
 ### Running the app
 
@@ -568,6 +597,7 @@ With the virtual environment activated, from the project root:
 
 ```bash
 python app/export_artifacts.py     # once, about 8 minutes: fits the final models and saves them to app/artifacts/
+python app/compute_importance.py   # once, about 6 minutes: SHAP feature importance (no retraining)
 streamlit run app/Home.py          # then open http://localhost:8501
 ```
 

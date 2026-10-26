@@ -245,6 +245,29 @@ def load_artifacts():
     return bundle
 
 
+def stack_shap(X, bundle):
+    """SHAP values of the stacked model for prepared features X (output of preprocess, in feature_cols order).
+
+    Each model's SHAP values add up exactly to its predicted log price. The Ridge stack is a weighted sum of the
+    three models, so the stack's contribution of a feature is the same weighted sum of the models' contributions.
+    Returns (contributions with one column per feature, base log price). base + row sum = stacked log price.
+    """
+    import xgboost as xgb
+    from catboost import Pool
+
+    models, ridge = bundle["models"], bundle["ridge"]
+    X_enc = bundle["encoder"].transform(X)
+    shap = {
+        "xgb": models["xgb"].get_booster().predict(xgb.DMatrix(X_enc), pred_contribs=True),
+        "lgb": models["lgb"].predict(X_enc, pred_contrib=True),
+        "cat": models["cat"].get_feature_importance(Pool(X), type="ShapValues"),
+    }
+    # last column of each array is the model's base value
+    contributions = sum(ridge["coef"][m] * shap[m][:, :-1] for m in shap)
+    base = ridge["intercept"] + sum(ridge["coef"][m] * shap[m][0, -1] for m in shap)
+    return contributions, base
+
+
 def predict(raw, bundle):
     """Predict prices for raw rows. Returns one log-prediction per model, the stack, and the price."""
     raw = raw.astype(bundle["raw_dtypes"][raw.columns])

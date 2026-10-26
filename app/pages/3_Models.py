@@ -1,7 +1,13 @@
 from pathlib import Path
 
+import altair as alt
+import joblib
+import numpy as np
 import pandas as pd
 import streamlit as st
+
+from common import group_contents
+from pipeline import ARTIFACTS
 
 ASSETS = Path(__file__).resolve().parent.parent.parent / "assets"
 
@@ -67,3 +73,63 @@ with left:
                 "same way, so their errors overlap (correlation 0.99).")
 with right:
     st.image(str(ASSETS / "experiment_progression.png"), width="stretch")
+
+st.divider()
+st.header("What drives the price")
+
+importance_file = ARTIFACTS / "importance.joblib"
+if not importance_file.exists():
+    st.info("Run `python app/compute_importance.py` (after `export_artifacts.py`) to compute the feature importance.")
+    st.stop()
+
+imp = joblib.load(importance_file)
+st.markdown(
+    "Measured with **SHAP values**. For every sale, SHAP splits the predicted price into one contribution per "
+    "feature: starting from the average price, how much each feature pushed this particular prediction up or down. "
+    "Averaging the size of those pushes over many sales shows which features the model relies on most. The values "
+    f"below combine the three models with their Ridge weights, on {imp['n_rows']:,} random training sales."
+)
+
+
+def effect_chart(data, label, fmt):
+    chart_data = data.reset_index()
+    chart_data.columns = ["Feature", "Value"]
+    base = alt.Chart(chart_data).encode(
+        y=alt.Y("Feature:N", sort="-x", title=None, axis=alt.Axis(labelLimit=260)),
+        x=alt.X("Value:Q", title=label, axis=alt.Axis(format=fmt, grid=True)),
+    )
+    bars = base.mark_bar(color="#2a78d6", cornerRadiusEnd=3, height=16).encode(
+        tooltip=[alt.Tooltip("Feature:N"), alt.Tooltip("Value:Q", title=label, format=fmt)])
+    labels = base.mark_text(align="left", dx=4, fontSize=11, color="#3a3935").encode(
+        text=alt.Text("Value:Q", format=fmt))
+    return (bars + labels).properties(height=26 * len(chart_data) + 30)
+
+
+groups = imp["groups"] / imp["groups"].sum()
+features = np.expm1(imp["features"].head(20))   # mean |log contribution| as an average % effect on the price
+
+left, right = st.columns([1, 1.3], gap="large")
+with left:
+    st.subheader("By feature group")
+    st.altair_chart(effect_chart(groups, "Share of the model's decisions", ".0%"), width="stretch")
+    st.caption("Related features grouped together, e.g. Age = manufacture year, asset age and the unknown-year flag. "
+               "Grouping matters because related features share the credit between them.")
+with right:
+    st.subheader("Top 20 single features")
+    st.altair_chart(effect_chart(features, "Average effect on the price (±)", ".1%"), width="stretch")
+    st.caption("How much each feature changes a prediction on average, up or down. The model code is spread over "
+               "several columns (Spec_FullDescriptor, Spec_BaseClass, Spec_SubClass, …), so its total weight is "
+               "larger than any single bar; the group chart adds them up.")
+
+st.subheader("What each feature group contains")
+st.table(group_contents(imp).set_index("Group"))
+st.caption("All 61 features after feature engineering, each in exactly one group.")
+
+with st.expander("How to read this (and what it does not show)"):
+    st.markdown(
+        "- SHAP shows what the trained models **rely on**, not what causes prices in the real world.\n"
+        "- Correlated features split the credit: manufacture year and asset age carry almost the same information, "
+        "so each looks less important alone than the pair does together. That is why the group chart is easier to "
+        "read.\n"
+        "- These are the app's models, trained on all sales, explained on training sales. They describe the models' "
+        "behaviour; the honest measure of accuracy on new data is still the cross-validation score.")

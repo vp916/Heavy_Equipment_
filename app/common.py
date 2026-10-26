@@ -20,6 +20,14 @@ def get_bundle():
     return load_artifacts()
 
 
+@st.cache_resource
+def get_importance():
+    """Feature importance written by compute_importance.py, or None if it has not been run."""
+    import joblib
+    path = ARTIFACTS / "importance.joblib"
+    return joblib.load(path) if path.exists() else None
+
+
 @st.cache_resource(show_spinner="Reading train.csv…")
 def load_train():
     """The raw training data, or None if train.csv is not in the project folder. Do not modify the result."""
@@ -68,3 +76,31 @@ def fmt(value):
 def value_table(rows, columns):
     """Small table of already formatted values (all text, so mixed types display cleanly)."""
     return pd.DataFrame([[fmt(v) for v in row] for row in rows], columns=columns)
+
+
+GROUP_DESCRIPTIONS = {
+    "Model identity": "Which exact model the machine is: the full model code, its parts and the configuration ID",
+    "Age": "How old the machine was when it was sold",
+    "Machine type and size": "The machine family and its size class (e.g. 21 to 24 metric tons), parsed from the "
+                             "functional classification",
+    "Sale date": "When the sale happened, which captures the market level and the season",
+    "Usage": "How much the machine has been used, from the hour meter",
+    "Region": "The US state where it was sold",
+    "Seller and data source": "Who sold it and where the record came from",
+    "Components (col*, cab, drivetrain)": "Equipment details: cab, drivetrain, forks and the anonymised component "
+                                          "columns, including the parsed measurements (sizes in feet or inches)",
+}
+
+
+def group_contents(importance):
+    """One row per feature group: its share of the model's decisions, a description and all its columns."""
+    members = {}
+    for feature, group in importance["group_of"].items():
+        members.setdefault(group, []).append(feature)
+    shares = importance["groups"] / importance["groups"].sum()
+    return pd.DataFrame({
+        "Group": shares.index,
+        "Share": [f"{s:.1%}" for s in shares.values],
+        "What it means": [GROUP_DESCRIPTIONS.get(g, "") for g in shares.index],
+        "Columns": [", ".join(members[g]) for g in shares.index],
+    })
