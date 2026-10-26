@@ -5,7 +5,8 @@ __pycache__/
 *.py[cod]
 *.so
 
-
+notebooks/versions/training_mlp.ipynb
+notebooks/ft_transformer.ipynb
 # Virtual Environment
 
 bin/
@@ -17,7 +18,8 @@ etc/
 pyvenv.cfg
 
 # CatBoost
-
+*.png
+!assets/*.png
 
 catboost_info/
 
@@ -39,6 +41,7 @@ notebooks/train_model.py
 # Models/Artifacts
 
 models/
+app/artifacts/
 *.pkl
 *.pickle
 *.joblib

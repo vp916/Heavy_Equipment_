@@ -49,3 +49,4 @@ traitlets==5.16.1
 typing_extensions==4.16.0
 wcwidth==0.8.3
 xgboost==3.4.1
+streamlit==1.66.1

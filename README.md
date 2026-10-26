@@ -26,6 +26,8 @@ The pipeline:
 
 The work was split by model. Each model was first developed and tuned in its own notebook (kept in [`notebooks/versions/`](notebooks/versions/)). The three were then combined in [`notebooks/model_development.ipynb`](notebooks/model_development.ipynb).
 
+A Streamlit app ([`app/`](app/), Section 10) explains the data and the pipeline and prices machines live with the final models.
+
 | | |
 |---|---|
 | **Task** | Tabular regression · 138,701 training and 15,000 test transactions |
@@ -34,6 +36,7 @@ The work was split by model. Each model was first developed and tuned in its own
 | **Best single model (5-fold CV)** | LightGBM (tuned): 0.20025 |
 | **Stacked ensemble (5-fold OOF)** | **0.19677** |
 | **Leaderboard (held-out test)** | **0.19099** |
+| **Front end** | Streamlit app with live predictions (Section 10) |
 
 ![Cross-validation RMSLE across milestones](assets/experiment_progression.png)
 
@@ -52,6 +55,7 @@ The blue line shows the 5-fold CV score at each milestone, and the grey line sho
 7. [Environment Setup](#7-environment-setup)
 8. [Data Setup](#8-data-setup)
 9. [Running the Notebook](#9-running-the-notebook)
+10. [Streamlit App](#10-streamlit-app)
 
 ---
 
@@ -202,7 +206,7 @@ Out-of-fold predictions ─► Ridge meta-model (5-fold) ─► submission.csv
 
 ### 4.2 Encoding
 
-- **`DataTransformer`** fills missing numeric values with the median. It then ordinal-encodes every categorical column. Unseen categories become −1.
+- **`DataTransformer`** fills missing numeric values with the median. It then ordinal-encodes every categorical column. Unseen categories become −1, and so do missing values in the text columns that are not `col*` columns. (`fill_cols` was meant to fill those with `"Unknown"`, but pandas 3 reads text columns with the `str` dtype, so its `dtype == "object"` check selects nothing. Code −1 gives missing values their own category in the same way.)
 - **`SmoothedTargetEncoder`** is applied to the 8 categorical columns with more than 20 levels: `VendorPartnerID`, `Spec_FullDescriptor`, `Spec_BaseClass`, `Spec_SubClass`, `Spec_ReleaseSeries`, `Spec_VariantModifier`, `FunctionalClassification` and `RegionCode`. It is computed on the log target:
 
 ```math
@@ -311,6 +315,16 @@ With the search leak-free, tuning changes little. The only switch, LightGBM, gai
 
 Stacking improves on the best single model (LightGBM, 0.20025) by about 0.0035 RMSLE.
 
+The final Ridge (intercept −0.0651) gives each model this weight:
+
+| Model | Ridge weight | Share |
+|---|---:|---:|
+| XGBoost | 0.249 | 24.8% |
+| LightGBM | 0.327 | 32.5% |
+| CatBoost | 0.430 | 42.8% |
+
+CatBoost gets the largest weight although it is the weakest single model. XGBoost and LightGBM see the same inputs and grow their trees the same way, so their errors are very similar. CatBoost's symmetric trees on ordinal features make different errors, and the stack gains the most from those.
+
 On the leaderboard the stacked submission scores **0.19099**, about 0.006 better than its CV score. Cross-validation is therefore a conservative estimate. If target information were leaking into the validation folds, the CV score would be the optimistic one instead.
 
 ### 5.4 Changes from the first version
@@ -342,13 +356,27 @@ heavy_equipment/
 ├── README.md
 ├── requirements.txt
 ├── .gitignore
+├── .streamlit/
+│   └── config.toml                          # theme of the Streamlit app
 │
 ├── assets/                                  # figures used in this README
 │   ├── experiment_progression.png
 │   ├── target_distribution.png
 │   ├── manufacture_year_distribution.png
 │   ├── missing_data_map.png
-│   └── validation_rmsle_across_folds.png
+│   ├── validation_rmsle_across_folds.png
+│   └── streamlit_predict.png
+│
+├── app/                                     # Streamlit app (Section 10)
+│   ├── Home.py                              # overview page, entry point
+│   ├── pages/
+│   │   ├── 1_Data.py
+│   │   ├── 2_Pipeline.py
+│   │   ├── 3_Models.py
+│   │   └── 4_Predict.py
+│   ├── pipeline.py                          # the notebook's preprocessing + prediction
+│   ├── export_artifacts.py                  # refits the final models on all data and saves them
+│   └── artifacts/                           # saved models (not tracked)
 │
 ├── notebooks/
 │   ├── model_development.ipynb              # final pipeline: EDA → features → 3 models → tuning → stacking → submission
@@ -364,7 +392,9 @@ heavy_equipment/
 - `notebooks/model_development.ipynb` is the main notebook. It combines the three models, their tuning and the stacking step, and writes `submission.csv`.
 - `notebooks/versions/` holds the single-model notebooks the final pipeline was built from. They share the same EDA and feature-engineering steps, and each one trains and tunes one model. The team developed them in parallel, one notebook per member. See [`notebooks/versions/README.md`](notebooks/versions/README.md) for their scores.
 
-The datasets (`*.csv`), model files, CatBoost logs (`catboost_info/`) and the virtual environment are excluded from Git through `.gitignore`.
+- `app/` is the Streamlit front end. It reuses the notebook's preprocessing code and the final models (Section 10).
+
+The datasets (`*.csv`), model files (including `app/artifacts/`), CatBoost logs (`catboost_info/`) and the virtual environment are excluded from Git through `.gitignore`.
 
 ---
 
@@ -404,7 +434,7 @@ python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 ```
 
-The main libraries are `pandas`, `numpy`, `scikit-learn`, `xgboost`, `lightgbm`, `catboost`, `matplotlib` and `seaborn`. `requirements.txt` pins exact versions.
+The main libraries are `pandas`, `numpy`, `scikit-learn`, `xgboost`, `lightgbm`, `catboost`, `matplotlib` and `seaborn`, plus `streamlit` for the app. `requirements.txt` pins exact versions.
 
 ### Register the Jupyter kernel
 
@@ -483,3 +513,41 @@ Training runs on the CPU. No GPU is needed. Hyperparameter tuning is the slowest
 | Predicted (test) | \$7,314 | \$20,864 | \$34,625 | \$40,915 | \$56,139 | \$144,337 |
 
 The predicted distribution is slightly narrower (standard deviation \$25,050 vs \$26,361). This is expected: averaging three models and five folds pulls the most extreme predictions toward the middle.
+
+---
+
+## 10. Streamlit App
+
+The `app/` folder holds a Streamlit front end for the project. It explains the data and the pipeline, and it predicts prices live with the final stacked model.
+
+![Predict page of the Streamlit app](assets/streamlit_predict.png)
+
+| Page | Contents |
+|---|---|
+| **Home** | The problem, the RMSLE metric, why the target is log-transformed, headline scores |
+| **Data** | Column groups and the main data challenges: placeholder years, block-wise missing values, rare model codes, disguised missing values, the noise floor and the changing market |
+| **Pipeline** | Flow diagram from the raw CSV to the final price, with an explanation of every step |
+| **Models** | Model settings, fold scores, tuning decisions, Ridge weights and the progression chart |
+| **Predict** | Pick a machine type and model code, change the manufacture year, hours, sale date, region, cab and drivetrain, and get the predicted price with each model's own prediction, a typical range and a depreciation curve. A second mode prices real sales from the test set |
+
+### Running the app
+
+With the virtual environment activated, from the project root:
+
+```bash
+python app/export_artifacts.py     # once, about 8 minutes: fits the final models and saves them to app/artifacts/
+streamlit run app/Home.py          # then open http://localhost:8501
+```
+
+- Run both commands from the project root. Streamlit reads the theme from `.streamlit/config.toml` in the folder it is started from.
+- Home, Data, Pipeline and Models work without the export step. Only Predict needs the saved models.
+- The saved models take 382 MB and are not tracked by Git (`lgb.txt` and `xgb.ubj` are also larger than GitHub's 100 MB file limit), so every fresh clone runs `export_artifacts.py` once. Loading them takes about 1 GB of RAM.
+
+### How the Predict page works
+
+- **Same preprocessing as training.** `app/pipeline.py` contains the notebook's preprocessing code (`SmoothedTargetEncoder`, `parse_functional_classification`, `clean_machine_measurements`, `feature_engineering`, `DataTransformer`), so a row typed into the app is transformed exactly like the training data. There is one change: in `parse_functional_classification`, `str.split(..., expand=True)` only creates the second column if at least one label in the batch contains a dash or a comma, which fails for a single row. The app's copy adds `.reindex(columns=[0, 1])`. The output on the full data is identical.
+- **Final models.** `app/export_artifacts.py` refits the three models on all 138,701 training rows with the settings chosen in the notebook (LightGBM tuned, XGBoost and CatBoost baseline). Without a validation fold there is no early stopping, so each model gets a fixed tree count: the mean best iteration of the notebook's 5-fold run, scaled by 1.15 because the full data is 25% larger than a training fold. That gives XGBoost 6,650, LightGBM 4,950 and CatBoost 19,000 trees.
+- **Stacking.** The three predictions are combined with the Ridge weights from the notebook (Section 5.3). The typical range shown is ± one stack RMSLE (0.197 in log space, about ±20%).
+- **Autofill.** When a model code is picked, every field the form does not show is filled with the most common value for that model code in the training data.
+- **Check against the submission.** On the 15,000 test rows the app's predictions correlate 0.9995 with `notebooks/submission.csv` (RMSLE 0.019 between the two, mean offset −0.2%). The small difference comes from using one full-data model per type instead of averaging five fold models. Predicting one row at a time gives exactly the same prices as predicting the whole test set at once.
+- **Depreciation curve.** The curve rises steeply for machines built after about 1995 and is almost flat before that. Very old machines are rare in the data, and tree models cannot extrapolate beyond what they have seen.
